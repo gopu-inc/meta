@@ -1,3 +1,6 @@
+use std::env;
+use std::fs;
+
 mod lexer;
 mod parser;
 mod ast;
@@ -8,23 +11,31 @@ use parser::Parser;
 use runtime::Env;
 
 fn main() {
-    let code = r#"
-        let x = 10;
-        let y = 20;
-        fn add(a, b) { return a + b; }
-        add(x, y);
-    "#;
+    // Lire argument CLI
+    let args: Vec<String> = env::args().collect();
 
-    let mut lexer = Lexer::new(code);
+    if args.len() < 2 {
+        println!("Usage: meta <file.ta>");
+        return;
+    }
+
+    let filename = &args[1];
+
+    // Lire fichier
+    let code = fs::read_to_string(filename)
+        .expect("Impossible de lire le fichier");
+
+    // Lexer
+    let mut lexer = Lexer::new(&code);
     let tokens = lexer.tokenize();
 
+    // Parser
     let mut parser = Parser::new(tokens);
     let ast = parser.parse();
 
+    // Runtime
     let mut env = Env::new();
     let result = env.eval_block(&ast);
 
     println!("Result: {:?}", result);
 }
-
-
