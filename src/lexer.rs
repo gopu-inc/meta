@@ -58,7 +58,23 @@ impl Lexer {
                 '+' => tokens.push(Token::Plus),
                 '-' => tokens.push(Token::Minus),
                 '*' => tokens.push(Token::Star),
-                '/' => tokens.push(Token::Slash),
+                '/' => {
+    self.pos += 1;
+
+    // Si prochain caractère est '/', c’est un commentaire
+    if self.next_char() == Some('/') {
+        // Skip jusqu’à la fin de ligne
+        while let Some(c) = self.next_char() {
+            if c == '\n' {
+                break;
+            }
+            self.pos += 1;
+        }
+    } else {
+        tokens.push(Token::Slash);
+        continue;
+    }
+                }
                 '(' => tokens.push(Token::LParen),
                 ')' => tokens.push(Token::RParen),
                 '{' => tokens.push(Token::LBrace),
