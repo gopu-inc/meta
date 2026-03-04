@@ -3,20 +3,23 @@ use crate::ast::{Expr, Stmt};
 
 pub struct Parser {
     tokens: Vec<Token>,
-    pos: usize,
+    position: usize,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Self { tokens, position: 0 }
     }
 
     fn current(&self) -> Token {
-        self.tokens.get(self.pos).cloned().unwrap_or(Token::EOF)
+        self.tokens
+            .get(self.position)
+            .cloned()
+            .unwrap_or(Token::EOF)
     }
 
     fn advance(&mut self) {
-        self.pos += 1;
+        self.position += 1;
     }
 
     fn eat(&mut self, expected: Token) {
@@ -37,86 +40,24 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Stmt {
         match self.current() {
-
             Token::Let => {
                 self.advance();
                 if let Token::Ident(name) = self.current() {
                     self.advance();
-                    self.eat(Token::Eq);
+                    self.eat(Token::Equal);
                     let expr = self.parse_expr();
                     self.eat(Token::Semicolon);
-                    Stmt::Let { name, expr }
+                    Stmt::Let(name, expr)
                 } else {
                     panic!("Expected identifier after let");
                 }
             }
-
-            Token::Fn => {
-                self.advance();
-                if let Token::Ident(name) = self.current() {
-                    self.advance();
-
-                    self.eat(Token::LParen);
-                    let mut params = Vec::new();
-                    while let Token::Ident(p) = self.current() {
-                        params.push(p);
-                        self.advance();
-                        if self.current() == Token::Comma {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    self.eat(Token::RParen);
-
-                    self.eat(Token::LBrace);
-                    let mut body = Vec::new();
-                    while self.current() != Token::RBrace {
-                        body.push(self.parse_stmt());
-                    }
-                    self.eat(Token::RBrace);
-
-                    Stmt::Fn { name, params, body }
-                } else {
-                    panic!("Expected function name");
-                }
-            }
-
-            Token::If => {
-                self.advance();
-                let condition = self.parse_expr();
-
-                self.eat(Token::LBrace);
-                let mut then_branch = Vec::new();
-                while self.current() != Token::RBrace {
-                    then_branch.push(self.parse_stmt());
-                }
-                self.eat(Token::RBrace);
-
-                let mut else_branch = Vec::new();
-                if self.current() == Token::Else {
-                    self.advance();
-                    self.eat(Token::LBrace);
-                    while self.current() != Token::RBrace {
-                        else_branch.push(self.parse_stmt());
-                    }
-                    self.eat(Token::RBrace);
-                }
-
-                Stmt::If {
-                    cond: condition,
-                    then_branch,
-                    else_branch,
-                }
-            }
-
             Token::Return => {
                 self.advance();
                 let expr = self.parse_expr();
                 self.eat(Token::Semicolon);
                 Stmt::Return(expr)
             }
-
             _ => {
                 let expr = self.parse_expr();
                 self.eat(Token::Semicolon);
@@ -125,150 +66,120 @@ impl Parser {
         }
     }
 
-    // ===============================
-    // EXPRESSIONS (avec priorité)
-    // ===============================
-
     fn parse_expr(&mut self) -> Expr {
         self.parse_equality()
     }
 
     fn parse_equality(&mut self) -> Expr {
-        let mut left = self.parse_comparison();
+        let mut expr = self.parse_comparison();
 
-        while self.current() == Token::EqEq || self.current() == Token::NotEq {
-            let op = match self.current() {
-                Token::EqEq => "==",
-                Token::NotEq => "!=",
-                _ => unreachable!(),
-            }.to_string();
-
+        while self.current() == Token::EqualEqual
+            || self.current() == Token::BangEqual
+        {
+            let op = self.current();
             self.advance();
             let right = self.parse_comparison();
-            left = Expr::BinOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
+
+            let op_str = match op {
+                Token::EqualEqual => "==",
+                Token::BangEqual => "!=",
+                _ => unreachable!(),
             };
+
+            expr = Expr::Binary(Box::new(expr), op_str.to_string(), Box::new(right));
         }
 
-        left
+        expr
     }
 
     fn parse_comparison(&mut self) -> Expr {
-        let mut left = self.parse_term();
+        let mut expr = self.parse_term();
 
-        while self.current() == Token::Lt || self.current() == Token::Gt {
-            let op = match self.current() {
-                Token::Lt => "<",
-                Token::Gt => ">",
-                _ => unreachable!(),
-            }.to_string();
-
+        while self.current() == Token::Less
+            || self.current() == Token::Greater
+            || self.current() == Token::LessEqual
+            || self.current() == Token::GreaterEqual
+        {
+            let op = self.current();
             self.advance();
             let right = self.parse_term();
-            left = Expr::BinOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
+
+            let op_str = match op {
+                Token::Less => "<",
+                Token::Greater => ">",
+                Token::LessEqual => "<=",
+                Token::GreaterEqual => ">=",
+                _ => unreachable!(),
             };
+
+            expr = Expr::Binary(Box::new(expr), op_str.to_string(), Box::new(right));
         }
 
-        left
+        expr
     }
 
     fn parse_term(&mut self) -> Expr {
-        let mut left = self.parse_factor();
+        let mut expr = self.parse_factor();
 
-        while self.current() == Token::Plus || self.current() == Token::Minus {
-            let op = match self.current() {
+        while self.current() == Token::Plus
+            || self.current() == Token::Minus
+        {
+            let op = self.current();
+            self.advance();
+            let right = self.parse_factor();
+
+            let op_str = match op {
                 Token::Plus => "+",
                 Token::Minus => "-",
                 _ => unreachable!(),
-            }.to_string();
-
-            self.advance();
-            let right = self.parse_factor();
-            left = Expr::BinOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
             };
+
+            expr = Expr::Binary(Box::new(expr), op_str.to_string(), Box::new(right));
         }
 
-        left
+        expr
     }
 
     fn parse_factor(&mut self) -> Expr {
-        let mut left = self.parse_primary();
+        let mut expr = self.parse_primary();
 
-        while self.current() == Token::Star || self.current() == Token::Slash {
-            let op = match self.current() {
+        while self.current() == Token::Star
+            || self.current() == Token::Slash
+        {
+            let op = self.current();
+            self.advance();
+            let right = self.parse_primary();
+
+            let op_str = match op {
                 Token::Star => "*",
                 Token::Slash => "/",
                 _ => unreachable!(),
-            }.to_string();
-
-            self.advance();
-            let right = self.parse_primary();
-            left = Expr::BinOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
             };
+
+            expr = Expr::Binary(Box::new(expr), op_str.to_string(), Box::new(right));
         }
 
-        left
+        expr
     }
 
     fn parse_primary(&mut self) -> Expr {
         match self.current() {
-
-            Token::Int(n) => {
+            Token::Number(n) => {
                 self.advance();
-                Expr::Int(n)
+                Expr::Number(n)
             }
-
-            Token::Bool(b) => {
-                self.advance();
-                Expr::Bool(b)
-            }
-
             Token::Ident(ref name) => {
                 let name = name.clone();
                 self.advance();
-
-                if self.current() == Token::LParen {
-                    self.advance();
-                    let mut args = Vec::new();
-
-                    if self.current() != Token::RParen {
-                        loop {
-                            args.push(self.parse_expr());
-                            if self.current() == Token::Comma {
-                                self.advance();
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-
-                    self.eat(Token::RParen);
-
-                    Expr::Call { name, args }
-                } else {
-                    Expr::Var(name)
-                }
+                Expr::Variable(name)
             }
-
             Token::LParen => {
                 self.advance();
                 let expr = self.parse_expr();
                 self.eat(Token::RParen);
                 expr
             }
-
-            _ => panic!("Unexpected token {:?}", self.current()),
+            _ => panic!("Unexpected token: {:?}", self.current()),
         }
     }
-              }
+            }
