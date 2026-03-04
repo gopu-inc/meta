@@ -1,122 +1,214 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Int(i64),
-    Bool(bool),
+    // Literals
+    Number(i64),
     Ident(String),
+
+    // Keywords
+    Fn,
+    Let,
+    If,
+    Else,
+    Return,
+
+    // Operators
     Plus,
     Minus,
     Star,
     Slash,
+    Equal,
+    EqualEqual,
+    Bang,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+
+    // Symbols
     LParen,
     RParen,
     LBrace,
     RBrace,
     Comma,
-    Eq,
     Semicolon,
-    If,
-    Else,
-    Fn,
-    Let,
-    Return,
-    Lt,
-    Gt,
-    EqEq,
-    NotEq,
+
     EOF,
 }
 
 pub struct Lexer {
     input: Vec<char>,
-    pos: usize,
+    position: usize,
 }
 
 impl Lexer {
     pub fn new(input: &str) -> Self {
-        Lexer { input: input.chars().collect(), pos: 0 }
+        Self {
+            input: input.chars().collect(),
+            position: 0,
+        }
     }
 
-    fn next_char(&mut self) -> Option<char> {
-        if self.pos >= self.input.len() { None } else { Some(self.input[self.pos]) }
+    fn current(&self) -> Option<char> {
+        self.input.get(self.position).copied()
     }
 
-    pub fn tokenize(&mut self) -> Vec<Token> {
-        let mut tokens = Vec::new();
-        while let Some(ch) = self.next_char() {
-            match ch {
-                '0'..='9' => {
-                    let mut num = String::new();
-                    while let Some(d) = self.next_char() {
-                        if d.is_digit(10) {
-                            num.push(d);
-                            self.pos += 1;
-                        } else { break; }
-                    }
-                    tokens.push(Token::Int(num.parse().unwrap()));
-                    continue;
-                }
-                '+' => tokens.push(Token::Plus),
-                '-' => tokens.push(Token::Minus),
-                '*' => tokens.push(Token::Star),
-                '/' => {
-    self.pos += 1;
+    fn advance(&mut self) {
+        self.position += 1;
+    }
 
-    // Si prochain caractère est '/', c’est un commentaire
-    if self.next_char() == Some('/') {
-        // Skip jusqu’à la fin de ligne
-        while let Some(c) = self.next_char() {
+    fn skip_whitespace(&mut self) {
+        while let Some(c) = self.current() {
+            if c.is_whitespace() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn skip_comment(&mut self) {
+        while let Some(c) = self.current() {
             if c == '\n' {
                 break;
             }
-            self.pos += 1;
+            self.advance();
         }
-    } else {
-        tokens.push(Token::Slash);
-        continue;
     }
+
+    fn read_number(&mut self) -> i64 {
+        let mut num = String::new();
+        while let Some(c) = self.current() {
+            if c.is_ascii_digit() {
+                num.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        num.parse().unwrap()
+    }
+
+    fn read_ident(&mut self) -> String {
+        let mut ident = String::new();
+        while let Some(c) = self.current() {
+            if c.is_alphanumeric() || c == '_' {
+                ident.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        ident
+    }
+
+    pub fn next_token(&mut self) -> Token {
+        self.skip_whitespace();
+
+        match self.current() {
+            Some(c) => match c {
+                '+' => {
+                    self.advance();
+                    Token::Plus
                 }
-                '(' => tokens.push(Token::LParen),
-                ')' => tokens.push(Token::RParen),
-                '{' => tokens.push(Token::LBrace),
-                '}' => tokens.push(Token::RBrace),
-                ',' => tokens.push(Token::Comma),
-                ';' => tokens.push(Token::Semicolon),
-                '=' => {
-                    self.pos += 1;
-                    if self.next_char() == Some('=') { tokens.push(Token::EqEq) } 
-                    else { tokens.push(Token::Eq); continue; }
+                '-' => {
+                    self.advance();
+                    Token::Minus
                 }
-                '<' => tokens.push(Token::Lt),
-                '>' => tokens.push(Token::Gt),
-                '!' => {
-                    self.pos += 1;
-                    if self.next_char() == Some('=') { tokens.push(Token::NotEq) }
+                '*' => {
+                    self.advance();
+                    Token::Star
                 }
-                c if c.is_alphabetic() => {
-                    let mut ident = String::new();
-                    while let Some(a) = self.next_char() {
-                        if a.is_alphanumeric() { ident.push(a); self.pos += 1; }
-                        else { break; }
+                '/' => {
+                    self.advance();
+                    if self.current() == Some('/') {
+                        self.advance();
+                        self.skip_comment();
+                        self.next_token()
+                    } else {
+                        Token::Slash
                     }
-                    let token = match ident.as_str() {
-                        "if" => Token::If,
-                        "else" => Token::Else,
+                }
+                '=' => {
+                    self.advance();
+                    if self.current() == Some('=') {
+                        self.advance();
+                        Token::EqualEqual
+                    } else {
+                        Token::Equal
+                    }
+                }
+                '!' => {
+                    self.advance();
+                    if self.current() == Some('=') {
+                        self.advance();
+                        Token::BangEqual
+                    } else {
+                        Token::Bang
+                    }
+                }
+                '<' => {
+                    self.advance();
+                    if self.current() == Some('=') {
+                        self.advance();
+                        Token::LessEqual
+                    } else {
+                        Token::Less
+                    }
+                }
+                '>' => {
+                    self.advance();
+                    if self.current() == Some('=') {
+                        self.advance();
+                        Token::GreaterEqual
+                    } else {
+                        Token::Greater
+                    }
+                }
+                '(' => {
+                    self.advance();
+                    Token::LParen
+                }
+                ')' => {
+                    self.advance();
+                    Token::RParen
+                }
+                '{' => {
+                    self.advance();
+                    Token::LBrace
+                }
+                '}' => {
+                    self.advance();
+                    Token::RBrace
+                }
+                ',' => {
+                    self.advance();
+                    Token::Comma
+                }
+                ';' => {
+                    self.advance();
+                    Token::Semicolon
+                }
+                c if c.is_ascii_digit() => {
+                    let number = self.read_number();
+                    Token::Number(number)
+                }
+                c if c.is_alphabetic() || c == '_' => {
+                    let ident = self.read_ident();
+                    match ident.as_str() {
                         "fn" => Token::Fn,
                         "let" => Token::Let,
+                        "if" => Token::If,
+                        "else" => Token::Else,
                         "return" => Token::Return,
-                        "true" => Token::Bool(true),
-                        "false" => Token::Bool(false),
                         _ => Token::Ident(ident),
-                    };
-                    tokens.push(token);
-                    continue;
+                    }
                 }
-                c if c.is_whitespace() => {},
-                _ => panic!("Unknown character: {}", ch),
-            }
-            self.pos += 1;
+                _ => {
+                    panic!("Caractère inattendu: {}", c);
+                }
+            },
+            None => Token::EOF,
         }
-        tokens.push(Token::EOF);
-        tokens
     }
-}
+                }
