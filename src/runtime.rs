@@ -1,104 +1,114 @@
-use crate::ast::{Expr, Stmt};
 use std::collections::HashMap;
+use crate::ast::{Expr, Stmt};
 
 #[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
     Bool(bool),
-    Function { params: Vec<String>, body: Vec<Stmt> },
     None,
 }
 
-#[derive(Debug, Clone)]
-pub struct Env {
-    pub vars: HashMap<String, Value>,
+pub struct Runtime {
+    pub globals: HashMap<String, Value>,
+    pub functions: HashMap<String, (Vec<String>, Vec<Stmt>)>,
 }
 
-impl Env {
+impl Runtime {
     pub fn new() -> Self {
-        Env { vars: HashMap::new() }
-    }
-
-    pub fn eval_expr(&mut self, expr: &Expr) -> Value {
-        match expr {
-            Expr::Int(n) => Value::Int(*n),
-            Expr::Bool(b) => Value::Bool(*b),
-            Expr::Var(name) => self.vars.get(name).cloned().unwrap_or(Value::None),
-
-            Expr::BinOp { left, op, right } => {
-                let l = self.eval_expr(left);
-                let r = self.eval_expr(right);
-                match (l, r, op.as_str()) {
-                    (Value::Int(a), Value::Int(b), "+") => Value::Int(a + b),
-                    (Value::Int(a), Value::Int(b), "-") => Value::Int(a - b),
-                    (Value::Int(a), Value::Int(b), "*") => Value::Int(a * b),
-                    (Value::Int(a), Value::Int(b), "/") => Value::Int(a / b),
-                    (Value::Int(a), Value::Int(b), "==") => Value::Bool(a == b),
-                    (Value::Int(a), Value::Int(b), "!=") => Value::Bool(a != b),
-                    (Value::Int(a), Value::Int(b), "<") => Value::Bool(a < b),
-                    (Value::Int(a), Value::Int(b), ">") => Value::Bool(a > b),
-                    _ => Value::None,
-                }
-            }
-
-            Expr::Call { name, args } => {
-                // On clone la fonction pour éviter le conflit d’emprunts
-                let func = match self.vars.get(name) {
-                    Some(Value::Function { params, body }) => (params.clone(), body.clone()),
-                    _ => return Value::None,
-                };
-
-                let (params, body) = func;
-                let mut local = Env::new();
-
-                for (p, a) in params.iter().zip(args.iter()) {
-                    let val = self.eval_expr(a);
-                    local.vars.insert(p.clone(), val);
-                }
-
-                local.eval_block(&body)
-            }
+        Runtime {
+            globals: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 
-    pub fn eval_stmt(&mut self, stmt: &Stmt) -> Value {
-        match stmt {
-            Stmt::Let { name, expr } => {
-                let val = self.eval_expr(expr);
-                self.vars.insert(name.clone(), val.clone());
-                val
-            }
-
-            Stmt::Expr(expr) => self.eval_expr(expr),
-
-            Stmt::Fn { name, params, body } => {
-                self.vars.insert(
-                    name.clone(),
-                    Value::Function {
-                        params: params.clone(),
-                        body: body.clone(),
-                    },
-                );
-                Value::None
-            }
-
-            Stmt::If { cond, then_branch, else_branch } => {
-                match self.eval_expr(cond) {
-                    Value::Bool(true) => self.eval_block(then_branch),
-                    Value::Bool(false) => self.eval_block(else_branch),
-                    _ => Value::None,
-                }
-            }
-
-            Stmt::Return(expr) => self.eval_expr(expr),
-        }
-    }
-
-    pub fn eval_block(&mut self, block: &[Stmt]) -> Value {
+    pub fn run(&mut self, statements: Vec<Stmt>) -> Value {
         let mut last = Value::None;
-        for stmt in block {
-            last = self.eval_stmt(stmt);
+        for stmt in statements {
+            last = self.exec_stmt(stmt);
         }
         last
+    }
+
+    fn exec_stmt(&mut self, stmt: Stmt) -> Value {
+        match stmt {
+            Stmt::Let(name, expr) => {
+                let val = self.eval_expr(expr);
+                self.globals.insert(name, val.clone());
+                val
+            }
+            Stmt::Expr(expr) => self.eval_expr(expr),
+            Stmt::Return(expr) => self.eval_expr(expr),
+            Stmt::Fn { name, params, body } => {
+                self.functions.insert(name, (params, body));
+                Value::None
+            }
+            Stmt::If { cond, then_branch, else_branch } => {
+                let cond_val = self.eval_expr(cond);
+                match cond_val {
+                    Value::Bool(true) => self.run(then_branch),
+                    Value::Bool(false) => self.run(else_branch),
+                    _ => panic!("Condition must be a boolean"),
+                }
+            }
+        }
+    }
+
+    fn eval_expr(&mut self, expr: Expr) -> Value {
+        match expr {
+            Expr::Number(n) => Value::Int(n),
+            Expr::Bool(b) => Value::Bool(b),
+            Expr::Variable(name) => {
+                self.globals.get(&name).cloned().unwrap_or(Value::None)
+            }
+            Expr::Binary(left, op, right) => {
+                let l = self.eval_expr(*left);
+                let r = self.eval_expr(*right);
+                self.eval_binary(op, l, r)
+            }
+            Expr::Call { name, args } => {
+                if let Some((params, body)) = self.functions.get(&name).cloned() {
+                    if params.len() != args.len() {
+                        panic!("Fonction {}: mauvais nombre d'arguments", name);
+                    }
+
+                    // Scope temporaire pour la fonction
+                    let mut backup = self.globals.clone();
+                    for (p, a) in params.iter().zip(args) {
+                        let val = self.eval_expr(a);
+                        self.globals.insert(p.clone(), val);
+                    }
+
+                    let result = self.run(body);
+                    self.globals = backup;
+                    result
+                } else {
+                    panic!("Fonction non définie: {}", name);
+                }
+            }
+        }
+    }
+
+    fn eval_binary(&self, op: String, l: Value, r: Value) -> Value {
+        match (l, r) {
+            (Value::Int(a), Value::Int(b)) => match op.as_str() {
+                "+" => Value::Int(a + b),
+                "-" => Value::Int(a - b),
+                "*" => Value::Int(a * b),
+                "/" => Value::Int(a / b),
+                "==" => Value::Bool(a == b),
+                "!=" => Value::Bool(a != b),
+                "<" => Value::Bool(a < b),
+                "<=" => Value::Bool(a <= b),
+                ">" => Value::Bool(a > b),
+                ">=" => Value::Bool(a >= b),
+                _ => panic!("Opérateur inconnu {}", op),
+            },
+            (Value::Bool(a), Value::Bool(b)) => match op.as_str() {
+                "==" => Value::Bool(a == b),
+                "!=" => Value::Bool(a != b),
+                _ => panic!("Opérateur booléen inconnu {}", op),
+            },
+            _ => panic!("Types incompatibles pour l'opérateur {}", op),
+        }
     }
 }
